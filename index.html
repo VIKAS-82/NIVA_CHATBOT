@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NIVA</title>
+  <link rel="stylesheet" href="/static/styles_v2.css" />
+</head>
+<body>
+  <header>
+    <h1>NIVA</h1>
+    <p class="tagline">Natural Interactive Voice Assistant</p>
+    <p class="mission">Designed for safety, comfort, and multilingual communication.<br> 
+      Inspired by real-life heroes to provide empathetic support<br>
+      and information access for rural Indian communities.</p>
+  </header>
+  <!-- <h1>Speech to AI Chat App</h1> -->
+  <button id="record">Ask NIVA</button>
+  <p id="status">Click to talk with NIVA</p>
+  <p><b>Recognized Text:</b> <span id="text"></span></p>
+  <p><b>AI Response:</b> <span id="response"></span></p>
+  <audio id="audio" controls></audio>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+
+    async function toggleRecording() {
+      const recordButton = document.getElementById("record");
+      const status = document.getElementById("status");
+
+      if (!isRecording) {
+        // Start recording
+        try {
+          isRecording = true;
+          audioChunks = [];
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          
+          mediaRecorder = new MediaRecorder(stream, { 
+            mimeType: 'audio/webm;codecs=opus' 
+          });
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = async () => {
+            try {
+              const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+              const formData = new FormData();
+              formData.append('file', audioBlob, 'audio.webm');
+
+              status.textContent = "Processing speech...";
+              const recordResponse = await fetch('http://localhost:3000/speech_to_text/', {
+                method: 'POST',
+                body: formData
+              });
+
+              const speechData = await recordResponse.json();
+              if (!recordResponse.ok || speechData.error) {
+                throw new Error(speechData.error || 'Failed to process speech');
+              }
+
+              document.getElementById("text").textContent = speechData.text;
+              status.textContent = "Generating AI response...";
+
+              const aiResponse = await fetch('http://localhost:3000/generate-response/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: speechData.text })
+              });
+
+              const aiData = await aiResponse.json();
+              if (!aiResponse.ok || aiData.error) {
+                throw new Error(aiData.error || 'Failed to generate AI response');
+              }
+
+              document.getElementById("response").textContent = aiData.response;
+              status.textContent = "Converting response to speech...";
+
+              // Replace the existing ttsResponse handling with:
+              const ttsResponse = await fetch('http://localhost:3000/text-to-speech/', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ text: aiData.response })
+              });
+
+              if (!ttsResponse.ok) {
+                  throw new Error('Error generating audio');
+              }
+
+              // Create blob from response and play
+              const audioBlobtts = await ttsResponse.blob();
+              const audioUrl = URL.createObjectURL(audioBlobtts);
+              const audioElement = document.getElementById("audio");
+              audioElement.src = audioUrl;
+              audioElement.play();  // Play the audio response
+
+             
+              audioElement.src = `http://localhost:3000/static/response.mp3?t=${Date.now()}`;
+              status.textContent = "Done!";
+            } catch (error) {
+              status.textContent = `Error: ${error.message}`;
+            } finally {
+              stream.getTracks().forEach(track => track.stop());
+              isRecording = false;
+            }
+          };
+
+          mediaRecorder.start();
+          recordButton.textContent = "Click to Stop Recording";
+          status.textContent = "Recording... Speak now";
+        } catch (error) {
+          status.textContent = `Error: ${error.message}`;
+          isRecording = false;
+        }
+      } else {
+        // Stop recording
+        try {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+          }
+          recordButton.textContent = "Ask NIVA";
+          status.textContent = "Stopping recording...";
+        } catch (error) {
+          console.error('Error stopping:', error);
+        }
+      }
+    }
+
+    document.getElementById("record").addEventListener('click', toggleRecording);
+  </script>
+</body>
+</html>
